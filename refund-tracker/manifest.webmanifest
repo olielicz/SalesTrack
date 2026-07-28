@@ -1,7 +1,7 @@
 {
-  "name": "Refund Tracker",
-  "short_name": "Refunds",
-  "description": "Track refunds, sales, expenses, profit, and disputes for your e-commerce store.",
+  "name": "OliSalesTrack",
+  "short_name": "OliSalesTrack",
+  "description": "Track sales, refunds, expenses and profit with real-time correlation analysis. Know exactly what's driving your numbers.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

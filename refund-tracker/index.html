@@ -11,7 +11,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg" />
     <link rel="apple-touch-icon" href="icons/icon-192.svg" />
-    <title>Refund Tracker</title>
+    <title>OliSalesTrack — Sales, Refunds &amp; Expense Tracker with Correlation Analysis</title>
 
     <!-- Tailwind via Play CDN. For production / Capacitor / Tauri builds,
          swap this for a precompiled tailwind.css per docs/CAPACITOR.md. -->
@@ -59,7 +59,7 @@
 
     <!-- Boot error fallback (shown only if the module script fails to start) -->
     <div id="boot-error" style="display:none;position:fixed;inset:0;background:#0b0f1d;color:#fff;font-family:monospace;padding:24px;overflow:auto">
-      <h2 style="color:#f87171;margin:0 0 12px">Failed to load Refund Tracker</h2>
+      <h2 style="color:#f87171;margin:0 0 12px">Failed to load OliSalesTrack</h2>
       <p style="color:#94a3b8;margin:0 0 12px">If you opened the file directly from disk, make sure your browser allows ES modules from <code>file://</code>, or host it on a static server (see README.md). Error details:</p>
       <pre id="boot-error-msg" style="white-space:pre-wrap;background:#0a0f24;border:1px solid #1f2a52;padding:12px;border-radius:8px"></pre>
     </div>
@@ -68,7 +68,7 @@
     'use strict';
 
     /* =====================================================================
-     * Refund Tracker — single-file PWA
+     * OliSalesTrack — single-file PWA
      * Stack: React 18 + htm (no JSX build step) + Tailwind Play CDN
      * Storage: localStorage (JSON, ~5MB room — enough for thousands of rows)
      * Persistence layer is isolated in `Store` so swapping for IndexedDB or
@@ -127,7 +127,7 @@
      * State + persistence
      * ================================================================= */
 
-    const STORAGE_KEY = 'refund-tracker:v1';
+    const STORAGE_KEY = 'olisalestrack:v2';
 
     const defaultState = () => ({
       sales:    [],
@@ -1016,7 +1016,7 @@
         const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `refund-tracker-backup-${todayISO()}.json`;
+        a.download = `olisalestrack-backup-${todayISO()}.json`;
         a.click();
       }
       function importJSON(e) {
@@ -1052,7 +1052,7 @@
               when available. On iPhone/iPad, open in Safari then <span class="text-cyan2">Share → Add to Home Screen</span>.
             </p>
             <div class="mt-3 flex flex-wrap gap-2">
-              <${Button} onClick=${onInstall} disabled=${!installable} tone=${installable ? 'good' : 'ghost'}>${installable ? 'Install Refund Tracker' : 'Install prompt unavailable'}<//>
+              <${Button} onClick=${onInstall} disabled=${!installable} tone=${installable ? 'good' : 'ghost'}>${installable ? 'Install OliSalesTrack' : 'Install prompt unavailable'}<//>
               <${Button} as="a" href="https://web.dev/learn/pwa/installation/" tone="ghost">How install works ↗<//>
             </div>
           <//>
@@ -1074,17 +1074,207 @@
     }
 
     /* ===================================================================
+     * Correlations Page — Sales, Refunds, Expenses Correlation Analysis
+     * ================================================================= */
+
+    function pearson(xs, ys) {
+      if (!xs.length || xs.length !== ys.length) return 0;
+      const n = xs.length, mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+      const num = xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);
+      const dx = Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0));
+      const dy = Math.sqrt(ys.reduce((s,y)=>s+(y-my)**2,0));
+      return (!dx||!dy)?0:num/(dx*dy);
+    }
+
+    function corrLabel(r) {
+      const a=Math.abs(r);
+      if(a>=0.7) return r>0?'Strong Positive ↗':'Strong Negative ↘';
+      if(a>=0.4) return r>0?'Moderate Positive':'Moderate Negative';
+      if(a>=0.1) return 'Weak';
+      return 'No Correlation';
+    }
+
+    function buildMonthTimeSeries(state, months) {
+      return months.map(ym => {
+        const t = totalsForMonth(state, ym);
+        return { ym, label: fmtMonthShort(ym), sales: t.grossSales, refunds: t.totalRefunds, expenses: t.totalExpenses, profit: t.profit, refundRate: t.refundRate };
+      });
+    }
+
+    function CorrelationsPage({ state, month }) {
+      const months = useMemo(() => lastNMonths(12, new Date(month + '-15')), [month]);
+      const ts = useMemo(() => buildMonthTimeSeries(state, months), [state, months]);
+      const cur = state.settings.currency;
+
+      const salesArr    = ts.map(d => d.sales);
+      const refundsArr  = ts.map(d => d.refunds);
+      const expensesArr = ts.map(d => d.expenses);
+      const profitArr   = ts.map(d => d.profit);
+      const rateArr     = ts.map(d => d.refundRate * 100);
+
+      const r1 = pearson(salesArr, refundsArr);
+      const r2 = pearson(salesArr, expensesArr);
+      const r3 = pearson(refundsArr, profitArr);
+      const r4 = pearson(expensesArr, salesArr);
+
+      const pairs = [
+        { label: 'Sales ↔ Refunds',   r: r1, a: salesArr,    b: refundsArr,  colorA: '#6366f1', colorB: '#f87171',
+          insight: Math.abs(r1)>0.5 ? (r1>0?'⚠️ Higher sales days reliably generate more refunds. Investigate product quality or fulfilment on peak days.':'📉 Unusual: sales and refunds move inversely.') : '✅ Refund volume is largely independent of sales spikes — a healthy sign.' },
+        { label: 'Sales ↔ Expenses',  r: r2, a: expensesArr, b: salesArr,    colorA: '#fbbf24', colorB: '#22d3ee',
+          insight: r2>0.4?'💡 Spending is positively correlated with revenue — your ad/ops costs are working. Consider increasing high-ROI expense categories.':r2<-0.2?'⚠️ Expenses are rising while sales are falling. Audit your cost structure urgently.':'─ Weak correlation between spending and sales. Some cost categories may not be generating returns.' },
+        { label: 'Refunds ↔ Profit',  r: r3, a: refundsArr,  b: profitArr,   colorA: '#f87171', colorB: '#34d399',
+          insight: r3<-0.4?'🔴 Refunds are strongly eroding your profit. Each refund spike directly causes a profit dip.':Math.abs(r3)<0.2?'🟢 Refunds have limited impact on overall profit — your margins absorb them well.':'⚠️ Moderate correlation between refunds and profit loss. Watch refund rate closely.' },
+        { label: 'Expenses → Revenue', r: r4, a: expensesArr, b: salesArr,    colorA: '#fbbf24', colorB: '#6366f1',
+          insight: r4>0.6?'🚀 Strong return on spend. Every dollar invested is meaningfully correlated with revenue growth.':r4<0?'❌ Spending is not generating proportional returns. Review your expense allocation immediately.':'📊 Moderate expense ROI. Check which categories drive the most revenue in the breakdown below.' },
+      ];
+
+      function CorrCard({ pair }) {
+        const abs = Math.abs(pair.r);
+        const tone = pair.r > 0.4 ? 'text-good' : pair.r < -0.4 ? 'text-bad' : 'text-warn';
+        return html`
+          <${Card} className="space-y-3">
+            <div class="font-semibold text-sm">${pair.label}</div>
+            <div class="flex items-center gap-3">
+              <div class=${`text-4xl font-bold font-mono tracking-tight ${tone}`}>${pair.r.toFixed(2)}</div>
+              <div>
+                <div class=${`text-xs font-bold uppercase tracking-widest ${tone}`}>${corrLabel(pair.r)}</div>
+                <div class="mt-1 h-2 w-36 rounded-full bg-white/5 overflow-hidden">
+                  <div class="h-full rounded-full transition-all" style=${{ width: (abs * 100) + '%', background: pair.r >= 0 ? '#34d399' : '#f87171' }}></div>
+                </div>
+              </div>
+            </div>
+            <p class="text-sm text-white/60 leading-relaxed">${pair.insight}</p>
+          <//>`
+      }
+
+      function MicroChart({ aData, bData, aColor, bColor, height = 100 }) {
+        const all = [...aData, ...bData];
+        const maxV = Math.max(1, ...all.map(Math.abs));
+        const w = 600, barW = (w - 20) / aData.length - 4;
+        const scl = v => (Math.abs(v) / maxV) * (height - 16);
+        return html`
+          <svg viewBox=${`0 0 ${w} ${height}`} class="w-full">
+            ${aData.map((a, i) => {
+              const bx = 10 + i * (barW + 4);
+              const ha = scl(a), hb = scl(bData[i]);
+              const yBase = height - 8;
+              return html`
+                <g key=${i}>
+                  <rect x=${bx}               y=${yBase-ha} width=${barW*0.45} height=${ha} rx="2" fill=${aColor + '99'}/>
+                  <rect x=${bx+barW*0.5}      y=${yBase-hb} width=${barW*0.45} height=${hb} rx="2" fill=${bColor + '99'}/>
+                </g>`;
+            })}
+          </svg>`;
+      }
+
+      return html`
+        <div class="space-y-5">
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            ${pairs.map(p => html`<${CorrCard} key=${p.label} pair=${p}/>`)}
+          </div>
+
+          <${Card} title="Sales vs Refund Rate — 12-month overlay">
+            <p class="text-xs text-white/50 mb-3">Bars: Sales (cyan) vs Refund Rate % (red). A rising red bar alongside rising cyan = healthy refund management.</p>
+            <${MicroChart} aData=${salesArr} bData=${rateArr} aColor="#22d3ee" bColor="#f87171" height=${140}/>
+            <div class="mt-2 flex gap-4 text-xs text-white/50">
+              <span>■ Sales ($)</span>
+              <span style="color:#f87171">■ Refund Rate (%)</span>
+            </div>
+          <//>
+
+          <div class="grid lg:grid-cols-2 gap-5">
+            <${Card} title="Sales vs Expenses — ROI view">
+              <p class="text-xs text-white/50 mb-3">Yellow = Expenses, Cyan = Sales they generated. Tall cyan bars relative to yellow = good ROI.</p>
+              <${MicroChart} aData=${expensesArr} bData=${salesArr} aColor="#fbbf24" bColor="#22d3ee" height=${120}/>
+            <//>
+            <${Card} title="Refunds vs Net Profit — erosion view">
+              <p class="text-xs text-white/50 mb-3">Red = Refunds, Green = Net Profit. Spikes in red that shrink green confirm refund damage.</p>
+              <${MicroChart} aData=${refundsArr} bData=${profitArr.map(p=>Math.max(0,p))} aColor="#f87171" bColor="#34d399" height=${120}/>
+            <//>
+          </div>
+
+          <${Card} title="Monthly Summary Table">
+            <div class="overflow-auto scroll-thin">
+              <table class="w-full text-xs">
+                <thead class="text-white/40 text-left uppercase tracking-widest">
+                  <tr><th class="pb-2">Month</th><th class="pb-2">Sales</th><th class="pb-2">Refunds</th><th class="pb-2">Refund %</th><th class="pb-2">Expenses</th><th class="pb-2">Profit</th><th class="pb-2">Margin</th></tr>
+                </thead>
+                <tbody>
+                  ${ts.slice().reverse().map(d => html`
+                    <tr key=${d.ym} class="border-t border-white/5">
+                      <td class="py-2 font-mono">${d.label}</td>
+                      <td class="py-2 text-cyan2 font-mono">${fmtMoney(d.sales, cur)}</td>
+                      <td class="py-2 text-bad font-mono">${fmtMoney(d.refunds, cur)}</td>
+                      <td class=${`py-2 font-mono ${d.refundRate>0.1?'text-bad':d.refundRate>0.05?'text-warn':'text-good'}`}>${fmtPct(d.refundRate)}</td>
+                      <td class="py-2 text-warn font-mono">${fmtMoney(d.expenses, cur)}</td>
+                      <td class=${`py-2 font-mono ${d.profit>=0?'text-good':'text-bad'}`}>${fmtMoney(d.profit, cur)}</td>
+                      <td class="py-2 text-white/60">${d.sales>0?fmtPct(d.profit/d.sales):'—'}</td>
+                    </tr>`)}
+                </tbody>
+              </table>
+            </div>
+          <//>
+        </div>`;
+    }
+
+    /* ===================================================================
+     * Upgrade Page
+     * ================================================================= */
+
+    function UpgradePage() {
+      return html`
+        <div class="space-y-5 max-w-2xl">
+          <${Card}>
+            <div class="text-center py-4">
+              <div class="text-4xl mb-3">⭐</div>
+              <h2 class="text-xl font-bold mb-2">Upgrade OliSalesTrack</h2>
+              <p class="text-sm text-white/60 mb-5">Unlock advanced correlation analysis, AI insights, PDF reports, and more. Support the development of this free tool.</p>
+              <div class="grid sm:grid-cols-2 gap-4 max-w-lg mx-auto">
+                <div class="rounded-xl border border-white/10 p-5 text-left">
+                  <div class="text-xl font-bold">$19/mo</div>
+                  <div class="text-xs text-white/50 mb-3">Pro Plan — cancel anytime</div>
+                  <ul class="text-xs text-white/70 space-y-1.5 mb-4">
+                    <li>✅ Full correlation analysis</li>
+                    <li>✅ AI business insights</li>
+                    <li>✅ PDF report generation</li>
+                    <li>✅ Multiple business profiles</li>
+                    <li>✅ Priority support</li>
+                  </ul>
+                  <${Button} as="a" href="https://workitlikeapro.com/olisalestrack/buy/" tone="primary" className="w-full justify-center">Subscribe $19/mo<//>`
+                + `</div>
+                <div class="rounded-xl border border-brand/40 bg-brand/5 p-5 text-left">
+                  <div class="text-xl font-bold">$149</div>
+                  <div class="text-xs text-white/50 mb-3">Lifetime — pay once, own forever</div>
+                  <ul class="text-xs text-white/70 space-y-1.5 mb-4">
+                    <li>✅ Everything in Pro</li>
+                    <li>✅ All future updates included</li>
+                    <li>✅ 3 business profiles</li>
+                    <li>✅ Early feature access</li>
+                    <li>✅ Never pay again</li>
+                  </ul>
+                  <${Button} as="a" href="https://workitlikeapro.com/olisalestrack/buy/#lifetime" tone="primary" className="w-full justify-center">Get Lifetime $149<//>
+                </div>
+              </div>
+              <p class="text-xs text-white/40 mt-4">🛡️ 30-day money-back guarantee on all plans. Secure checkout via Stripe &amp; PayPal.</p>
+            </div>
+          <//>
+        </div>`;
+    }
+
+    /* ===================================================================
      * Layout / shell
      * ================================================================= */
 
     const NAV = [
-      { id: 'dashboard', label: 'Dashboard', icon: '⌂' },
-      { id: 'refunds',   label: 'Refunds',   icon: '↺' },
-      { id: 'sales',     label: 'Sales',     icon: '$' },
-      { id: 'expenses',  label: 'Expenses',  icon: '▼' },
-      { id: 'disputes',  label: 'Disputes',  icon: '⚖' },
-      { id: 'import',    label: 'Import',    icon: '⇪' },
-      { id: 'settings',  label: 'Settings',  icon: '⚙' },
+      { id: 'dashboard',    label: 'Dashboard',    icon: '⌂' },
+      { id: 'correlations', label: 'Correlations', icon: '🔗' },
+      { id: 'refunds',      label: 'Refunds',      icon: '↺' },
+      { id: 'sales',        label: 'Sales',        icon: '$' },
+      { id: 'expenses',     label: 'Expenses',     icon: '▼' },
+      { id: 'disputes',     label: 'Disputes',     icon: '⚖' },
+      { id: 'import',       label: 'Import',       icon: '⇪' },
+      { id: 'upgrade',      label: 'Upgrade',      icon: '⭐' },
+      { id: 'settings',     label: 'Settings',     icon: '⚙' },
     ];
 
     function Sidebar({ page, onNavigate }) {
@@ -1093,8 +1283,8 @@
           <div class="p-5 flex items-center gap-3">
             <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-brand to-cyan2 flex items-center justify-center font-bold text-white text-sm">$↺</div>
             <div>
-              <div class="text-sm font-bold tracking-wide">Refund Tracker</div>
-              <div class="text-[10px] uppercase tracking-[0.18em] text-white/40">v1 · local</div>
+              <div class="text-sm font-bold tracking-wide">OliSalesTrack</div>
+              <div class="text-[10px] uppercase tracking-[0.18em] text-white/40">v2 · local</div>
             </div>
           </div>
           <nav class="px-3 pb-3 space-y-1">
@@ -1185,11 +1375,13 @@
 
       let body;
       switch (page) {
+        case 'correlations': body = html`<${CorrelationsPage} state=${state} month=${month}/>`; break;
         case 'refunds':  body = html`<${RefundsPage}  state=${state} dispatch=${dispatch} month=${month} requestAdd=${requestAdd}/>`; break;
         case 'sales':    body = html`<${SalesPage}    state=${state} dispatch=${dispatch} month=${month} requestAdd=${requestAdd}/>`; break;
         case 'expenses': body = html`<${ExpensesPage} state=${state} dispatch=${dispatch} month=${month} requestAdd=${requestAdd}/>`; break;
         case 'disputes': body = html`<${DisputesPage} state=${state}/>`; break;
         case 'import':   body = html`<${ImportPage}   state=${state} dispatch=${dispatch}/>`; break;
+        case 'upgrade':  body = html`<${UpgradePage}/>`; break;
         case 'settings': body = html`<${SettingsPage} state=${state} dispatch=${dispatch} installable=${installable} onInstall=${onInstall}/>`; break;
         default:         body = html`<${Dashboard}    state=${state} dispatch=${dispatch} month=${month} setMonth=${setMonth}/>`;
       }
