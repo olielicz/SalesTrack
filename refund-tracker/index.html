@@ -129,6 +129,15 @@
       { id: 'adyen',     name: 'Adyen',                  color: '#0abf53', text: '#fff', icon: 'Ay', dispute: 'https://ca-live.adyen.com/ca/ca/disputes/showList.shtml', desc: 'Adyen Customer Area → Risk → Disputes.' },
       { id: 'authnet',   name: 'Authorize.Net',          color: '#005ea2', text: '#fff', icon: 'AN', dispute: 'https://account.authorize.net/',                   desc: 'Authorize.Net Merchant Interface → Tools → Chargeback Management.' },
       { id: 'braintree', name: 'Braintree',              color: '#3a3a3a', text: '#fff', icon: 'Bt', dispute: 'https://www.braintreegateway.com/login',           desc: 'Braintree Control Panel → Disputes.' },
+      // FIX: Apple Pay and Google Pay are wallets layered on top of an
+      // underlying processor (Stripe, PayPal, Adyen, etc.) — neither has
+      // its own standalone merchant disputes portal the way Stripe/PayPal/
+      // Square do. `dispute: null` here (checked by disputeUrlFor() below)
+      // means the UI shows an honest "handled by your underlying processor"
+      // note instead of a broken/misleading link to a portal that doesn't
+      // exist for these two.
+      { id: 'applepay',  name: 'Apple Pay',              color: '#0a0a0a', text: '#fff', icon: 'AP', dispute: null, desc: 'Apple Pay has no separate disputes portal — disputes are handled by the underlying processor that processed the charge (e.g. Stripe, PayPal, Adyen). Check that processor\u2019s dispute tools instead.' },
+      { id: 'googlepay', name: 'Google Pay',             color: '#4285F4', text: '#fff', icon: 'GP', dispute: null, desc: 'Google Pay has no separate disputes portal — disputes are handled by the underlying processor that processed the charge (e.g. Stripe, PayPal, Adyen). Check that processor\u2019s dispute tools instead.' },
     ];
 
     const EXPENSE_CATEGORIES = [
@@ -891,7 +900,13 @@
         </div>`;
     }
     function blankSale() {
-      return { id: '', date: todayISO(), amount: 0, currency: 'USD', platform: 'Shopify', externalId: '', customer: '', notes: '' };
+      // FIX: added `paymentMethod` (optional, not shown in the manual-entry
+      // form below since a human entering a sale by hand rarely knows/cares
+      // about the underlying wallet type) so live-synced sales — which DO
+      // know this, from olisalestrack-sync's normalized event data
+      // (card/paypal_balance/klarna/apple_pay/google_pay/amazon_pay) —
+      // have somewhere to land instead of being silently dropped.
+      return { id: '', date: todayISO(), amount: 0, currency: 'USD', platform: 'Shopify', externalId: '', customer: '', notes: '', paymentMethod: '' };
     }
     function SaleForm({ item, onClose, onSave }) {
       const [draft, setDraft] = useState(item);
@@ -1043,7 +1058,7 @@
 
     function ImportPage({ state, dispatch }) {
       const [parsed, setParsed] = useState(null);
-      const [mapping, setMapping] = useState({ kind: 'sales', date: '', amount: '', externalId: '', notes: '', platform: 'Shopify' });
+      const [mapping, setMapping] = useState({ kind: 'sales', date: '', amount: '', externalId: '', notes: '', platform: 'Shopify', provider: 'Stripe' });
       const [error, setError] = useState('');
 
       function onFile(e) {
@@ -1097,7 +1112,7 @@
             item.customer = row['Email'] || row['Customer'] || '';
             items.push(item);
           } else if (mapping.kind === 'refunds') {
-            item.provider = 'Stripe';
+            item.provider = mapping.provider || 'Stripe';
             item.reason = 'Other';
             item.status = 'Refunded';
             items.push(item);
@@ -1140,6 +1155,19 @@
                 <${Field} label="Platform">
                   <${Select} value=${mapping.platform} onChange=${(v) => setMapping(m => ({...m, platform: v}))}>${PLATFORMS.map(p => html`<option key=${p} value=${p}>${p}</option>`)}<//>
                 </Field>
+                ${mapping.kind === 'refunds' && html`
+                <${Field} label="Payment provider">
+                  <!-- FIX: this used to be silently hardcoded to 'Stripe' for
+                       every CSV-imported refund regardless of which platform
+                       or processor it actually came from (see runImport()) —
+                       every dispute-portal link on an imported refund pointed
+                       at Stripe's dashboard even for a PayPal or Amazon
+                       refund. Now the importer asks, defaulting sensibly to
+                       whichever provider is most likely for the chosen
+                       platform, but always user-editable before import. -->
+                  <${Select} value=${mapping.provider} onChange=${(v) => setMapping(m => ({...m, provider: v}))}>${PROVIDERS.map(p => html`<option key=${p.id} value=${p.name}>${p.name}</option>`)}<//>
+                </Field>
+                `}
                 <${Field} label="Date column">
                   <${Select} value=${mapping.date} onChange=${(v) => setMapping(m => ({...m, date: v}))}>
                     <option value="">— select —</option>
@@ -1673,8 +1701,8 @@
                   <li>✅ PDF report export</li>
                   <li>✅ Multiple business profiles</li>
                   <li>✅ Sales, refunds &amp; expense tracking</li>
-                  <li>✅ CSV import (Shopify/WooCommerce/Stripe)</li>
-                  <li>✅ Dispute portal quick-links (10 providers)</li>
+                  <li>✅ CSV import (any CSV via manual column mapping; Shopify headers auto-detected)</li>
+                  <li>✅ Payment provider tags for 12 processors/wallets, dispute-portal quick-links for the 10 with one</li>
                 </ul>
               </div>
             </div>
