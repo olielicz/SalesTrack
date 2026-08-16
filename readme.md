@@ -36,15 +36,19 @@ Then open `http://localhost:8080`.
 
 ## Pricing
 
-**Free.** Correlation analysis, AI-generated insights, PDF report export, multiple
-business profiles, refund/expense tracking, dispute portal links, and CSV import are
-all included in the base app — none of them are gated behind a paid tier.
+**The standalone browser app is free.** Correlation analysis, AI-generated insights,
+PDF report export, multiple business profiles, refund/expense tracking, dispute portal
+links, and CSV import are all included in the base app at no cost.
 
-The `UpgradePage` previously advertised $19/mo Pro and $149 Lifetime tiers gating
-exactly these four features; since they're now genuinely built into the free app,
-that page has been corrected to state honestly that everything is included. If a
-real paid tier with a genuinely different feature set is introduced in the future,
-document that feature set specifically rather than re-gating what's already free.
+**OliSalesTrack Pro ($24/mo or $204/yr)** adds real-time live sync — sales and refunds
+are pulled automatically the moment they happen, straight from Stripe, PayPal, Shopify,
+WooCommerce, and Amazon webhooks (via the `olisalestrack-sync` server in the marketing
+repo). The Pro subscription includes all base features plus:
+- Live webhook sync from 5 platforms (no manual CSV export needed)
+- Automatic de-duplication and payment-method tagging
+- Priority support
+
+See https://workitlikeapro.com/olisalestrack/ for full details and a 14-day free trial.
 
 ## Changelog
 
